@@ -1,5 +1,7 @@
 #include <OctoWS2811.h>
 
+const bool debugMode = false;
+
 #define RED    0xFF0000
 #define GREEN  0x00FF00
 #define BLUE   0x0000FF
@@ -16,17 +18,17 @@ const int maxRows = 8;
 const int numLEDs = ledsPerStrip * maxRows;
 const int maxPayloadSize = (bytesPerColor * numLEDs); 
 const int maxBufSize = maxPayloadSize + headerSize;
-const int baudRate = 921600;
-const unsigned long resetTime = 10000;
+const int baudRate = 100000000;
+const unsigned long resetTime = 5000;
+const int delayTime = 2000;
 
 DMAMEM int displayMemory[ledsPerStrip*6];
 int drawingMemory[ledsPerStrip*6];
 const int config = WS2811_GRB | WS2811_800kHz;
 OctoWS2811 leds(ledsPerStrip, displayMemory, drawingMemory, config);
 
-byte ACK = 0x13;
-
-byte* pkt_buf[2];
+byte dataACK = 0xAB; // if C# receives a 0xAB, the teensys received the data
+byte displayACK = 0xCD; // if C# receives a 0xCD, the teensys sent the data to the leds
 
 byte inputBuffer[maxBufSize];
 
@@ -42,22 +44,24 @@ N - payload
 
 */
 
-byte outputBuffer[2];
 int serialBufIdx;
 int serialBufLen;
 int * bufPtr;
 bool serialPktEnd;
 unsigned long startTime;
 bool serialReset;
+int msg_len;
 
 
 void setOff();
 void setWall(byte grid[]);
 void setWallPtr(int * bufPtr);
 void showWall();
+void sendAck();
 void bootScreen();
 void resetScreen();
 void serialInterupt();
+void debugWall(int color);
 
 void setup()
 {
@@ -69,6 +73,7 @@ void setup()
 	serialPktEnd = false;
 	startTime = millis();
 	serialReset = false;
+	msg_len = -1;
 
 	memset(inputBuffer, 0, maxBufSize);
 
@@ -77,18 +82,50 @@ void setup()
 
 void loop()
 {
+	debugWall(0, WHITE);
+
 	if(serialPktEnd)
 	{
-		serialPktEnd = false;
 		serialBufIdx = 0;
+		msg_len = -1;
 
-		setWall(inputBuffer);
-		//setWallPtr(inputBuffer);
+		debugWall(0, RED);
+
+		if(0xFF == inputBuffer[0])
+		{
+			debugWall(0, ORANGE);
+			byte state = inputBuffer[1];
+			switch(state)
+			{
+				case 0: 
+					setOff();
+					break;
+				case 5:
+					setWall(inputBuffer);
+					break;
+				case 7:
+					showWall();
+					break;
+				default:
+					break;
+			}
+		}
+		serialPktEnd = false;
 	}
 
 	serialInterupt();
 }
 
+void debugWall(int ledNum, int color) 
+{ 	
+	if(debugMode)
+	{
+		leds.setPixel(ledNum, color); 
+		showWall();
+		delay(delayTime);
+	}	
+}
+	
 void serialEvent()
 {
 	if(serialPktEnd) { return; }
@@ -102,9 +139,19 @@ void serialEvent()
 		startTime = millis();
 		inputBuffer[serialBufIdx++] = Serial.read();
 
-		if(serialBufIdx >= maxBufSize)
+		if(serialBufIdx < 4)
+			continue;
+
+		else if((msg_len == -1) && (serialBufIdx == 4))
+		{
+			msg_len = (inputBuffer[3] << 8) | inputBuffer[2];
+		}
+
+		if((msg_len != -1) && ((serialBufIdx - 4) == msg_len))
 		{
 			serialPktEnd = true;
+			//sendDataAck();
+			break;
 		}
 	}
 }
@@ -125,20 +172,19 @@ void setWallPtr(int * bufPtr)
 
 	int r, g, b;
 
-	for int(i = 0; i < numLEDs; i++)
+	for (int i = 0; i < numLEDs; i++)
 	{
-		if(maxPaylodSize > (ptr - bufPtr)) { return; }
+		if(maxPayloadSize > (ptr - bufPtr)) { return; }
 
 		r = *ptr;
 		g = *(ptr+1);
 		b = *(ptr+2);
 
-		leds
-
 		ptr += 3;
-		leds.setPixel(ledIdx, r | g | b);		
+		leds.setPixel(i, r | g | b);		
 	}
 
+	//sendAck();
 	showWall();
 }
 
@@ -155,11 +201,32 @@ void setWall(byte grid[])
 
 		leds.setPixel(ledIdx, r | g | b);
 	}
-
-	showWall();
 }
 
-void showWall() { leds.show(); }
+void showWall() 
+{ 
+	leds.show(); 
+}
+
+void sendDataAck()
+{
+	if(!Serial)
+	{
+		Serial.begin(baudRate); 
+	}
+
+	Serial.write(dataACK);
+}
+
+void sendDisplayAck()
+{
+	if(!Serial)
+	{
+		Serial.begin(baudRate); 
+	}
+
+	Serial.write(displayACK);
+}
 
 void bootScreen()
 {
@@ -206,5 +273,6 @@ void serialInterupt()
 		resetScreen();
 		memset(inputBuffer, 0, maxBufSize);
 		serialBufIdx = 0;
+		msg_len = -1;
 	}
 }

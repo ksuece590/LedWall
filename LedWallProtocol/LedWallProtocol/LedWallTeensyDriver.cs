@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.IO.Ports;
+using System.Threading;
 
 namespace LedWallProtocol
 {
@@ -13,9 +14,12 @@ namespace LedWallProtocol
 
         SerialPort _serialPort;
 
+        byte[] ackbuf;
+
         public LedWallTeensyDriver(string portName, int baud)
         {
-            
+            ackbuf = new byte[10];
+
             try
             {
                 _serialPort = new SerialPort();
@@ -37,12 +41,20 @@ namespace LedWallProtocol
                 _serialPort.Close();
         }
 
-        public void Send(LedMessage message)
+        public void Send(LedMessage message, Semaphore notify=null)
         {
             if (_serialPort == null) return;
 
             byte[] buf = message.Serialize();
             _serialPort.Write(buf, 0, buf.Length);
+            if (notify != null)
+                notify.Release();
+        }
+
+        public byte[] WaitForAck()
+        {
+            _serialPort.Read(ackbuf, 0, 1);
+            return ackbuf;
         }
     }
 }

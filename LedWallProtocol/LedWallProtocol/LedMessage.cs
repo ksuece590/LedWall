@@ -17,6 +17,7 @@ namespace LedWallProtocol
         SetPixel        = 4,
         SetWall         = 5,
         SetSquare       = 6,
+        Show            = 7,
     }
 
     public class LedMessage
@@ -163,6 +164,16 @@ namespace LedWallProtocol
             }
             
             return _serialized;
+        }
+    }
+
+    public class LedMessageShow : LedMessage
+    {
+        public LedMessageShow() : base(LedMessageId.Show, 0) { }
+
+        public override byte[] Serialize()
+        {
+            return getHeader();
         }
     }
 }
