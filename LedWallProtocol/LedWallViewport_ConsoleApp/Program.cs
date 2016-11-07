@@ -9,6 +9,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.ComponentModel;
 using System.Diagnostics;
+using Accord.Video;
 
 namespace LedWallViewport_ConsoleApp
 {
@@ -16,77 +17,38 @@ namespace LedWallViewport_ConsoleApp
     {
         public const int LedsPerStrip = 170;
         public const int StripCount = 112;
-
         public const int FrameRate = 30;
-        public const int FrameDelay = 1000 / FrameRate;
+        public const int FrameInterval = (1000 / FrameRate);
 
         public static System.Windows.Forms.Screen CapturedScreen = System.Windows.Forms.Screen.AllScreens[1];
-
+        
         private static LedWallDriver _ledWall;
 
-        private static Bitmap[] frames = new Bitmap[2];
-        private static int frame_idx = 0;
-
         private static Color[,] grid = new Color[StripCount, LedsPerStrip];
-
-        private static BackgroundWorker bw;
+        
+        private static AsyncVideoSource avs;
 
         static void Main(string[] args)
         {
             _ledWall = new LedWallHardwareDriver(LedsPerStrip, StripCount);
-            //timer = new Timer(takeScreenshot, null, 0, FrameDelay);
+            
+            avs = new AsyncVideoSource(new ScreenCaptureStream(CapturedScreen.Bounds, FrameInterval));
+            avs.NewFrame += Avs_NewFrame;
+            avs.Start();
 
-            bw = new BackgroundWorker();
-            bw.WorkerSupportsCancellation = true;
-            bw.DoWork += Bw_DoWork;
-            bw.RunWorkerAsync();
-
-            while (true) Thread.Sleep(50);
+            Console.ReadKey();
+            avs.SignalToStop();
         }
 
-        private static void Bw_DoWork(object sender, DoWorkEventArgs e)
+        private static void Avs_NewFrame(object sender, NewFrameEventArgs eventArgs)
         {
-            BackgroundWorker self = sender as BackgroundWorker;
-
-            Stopwatch sw = new Stopwatch();
-
-            while (!self.CancellationPending)
-            {
-                sw.Restart();
-                takeScreenshot();
-                sw.Stop();
-
-                if((int)sw.ElapsedMilliseconds < FrameDelay)
-                    Thread.Sleep(FrameDelay - (int)sw.ElapsedMilliseconds);
-            }
-        }
-
-        private static void takeScreenshot()
-        {
-            //Create a new bitmap if necessary
-            if (frames[frame_idx % frames.Length] == null)
-            {
-                frames[frame_idx % frames.Length] = new Bitmap(CapturedScreen.Bounds.Width, CapturedScreen.Bounds.Height, PixelFormat.Format32bppArgb);
-            }
-            Bitmap frame = frames[frame_idx % frames.Length];
-            
-            // Create a graphics object from the bitmap.
-            var gfxScreenshot = Graphics.FromImage(frame);
-            
-            // Take the screenshot from the upper left corner to the right bottom corner.
-            gfxScreenshot.CopyFromScreen(CapturedScreen.Bounds.X, CapturedScreen.Bounds.Y, 0, 0, CapturedScreen.Bounds.Size, CopyPixelOperation.SourceCopy);
-            
-            Bitmap output = new Bitmap(frame, new Size(LedsPerStrip, StripCount));
+            Bitmap output = new Bitmap(eventArgs.Frame, new Size(LedsPerStrip, StripCount));
             Bmp2Grid(grid, output);
-            
             _ledWall.SetWall(grid);
         }
 
         private static void Bmp2Grid(Color[,] grid, Bitmap bmp, bool darken = false)
         {
-            //System.Diagnostics.Stopwatch sw = new System.Diagnostics.Stopwatch();
-            //sw.Start();
-
             if (bmp.PixelFormat != PixelFormat.Format32bppArgb)
             {
                 Bitmap conv = new Bitmap(bmp.Width, bmp.Height, PixelFormat.Format32bppArgb);

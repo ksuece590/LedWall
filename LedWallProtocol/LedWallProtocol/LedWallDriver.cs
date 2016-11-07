@@ -83,25 +83,10 @@ namespace LedWallProtocol
             //_drivers[11] = new LedWallTeensyDriver("COM17", BaudRate);
             //_drivers[12] = new LedWallTeensyDriver("COMX", BaudRate);
             //_drivers[13] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[14] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[15] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[16] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[17] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[18] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[19] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[20] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[21] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[22] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[23] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[24] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[25] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[26] = new LedWallTeensyDriver("COMX", BaudRate);
-            //_drivers[27] = new LedWallTeensyDriver("COMX", BaudRate);
 
             _nonNullDriverCount = _drivers.Where(d => d != null).Count();
             _sectionSent = new Semaphore(0, _nonNullDriverCount);
             _show = new Semaphore(0, _nonNullDriverCount);
-            //ThreadPool.QueueUserWorkItem(o => waitForAcks());
 
             bw = new BackgroundWorker();
             bw.WorkerReportsProgress = true;
@@ -142,12 +127,19 @@ namespace LedWallProtocol
                 }
                 catch { break; }
 
-                foreachDriver(idx =>
+                foreachDriver((idx, driver) =>
                 {
                     Color[,] section = new Color[LedWallTeensyDriver.StripsPerTeensy, Width];
                     Array.Copy(frame, idx * _ledsPerSection, section, 0, _ledsPerSection);
-                    return new LedMessageSetWall(section);
+                    driver.Send(new LedMessageSetWall(section), _sectionSent);
+                    _show.WaitOne();
+                    driver.Send(_showMsg);
                 });
+
+                // Wait for all sections to send before sending the ShowMessage
+                foreach (int i in Enumerable.Range(0, _nonNullDriverCount))
+                    _sectionSent.WaitOne();
+                _show.Release(_nonNullDriverCount);
 
                 fps += 1;
 
@@ -160,10 +152,8 @@ namespace LedWallProtocol
             }
         }
 
-        private void foreachDriver(Func<int, LedMessage> f)
+        private void foreachDriver(Action<int, LedWallTeensyDriver> f)
         {
-            byte[] teensy_response;
-
             for (int i = 0; i < _driverCount; i++)
             {
                 if (_drivers[i] == null)
@@ -174,37 +164,9 @@ namespace LedWallProtocol
                     object[] args = o as object[];
                     LedWallTeensyDriver d = (LedWallTeensyDriver)args[1];
                     int idx = (int)args[0];
-                    
-                    // Wait for go ahead to send next frame
-                    d.Send(f(idx), _sectionSent);
-
-                    // Wait for ACK
-                    //teensy_response = d.WaitForAck();
-                    //if (teensy_response[0] == dataACK)
-                    //    _sectionSent.Release();
-
-                    // Wait for go ahead to show frame
-                    _show.WaitOne();
-                    d.Send(_showMsg);
-                    //_sectionSent.Release();
-
-                    // Wait for ACK
-                    //teensy_response = d.WaitForAck();
-                    //if (teensy_response[0] == dataACK)
-                    //    _sectionSent.Release();
+                    f(idx, d);
                 }, new object[] { i, _drivers[i] });
             }
-            waitForAcks();
-            //ThreadPool.QueueUserWorkItem(o => waitForAcks());
-        }
-
-        private void waitForAcks()
-        {
-            foreach (int i in Enumerable.Range(0, _nonNullDriverCount))
-                _sectionSent.WaitOne();
-            _show.Release(_nonNullDriverCount);
-            //foreach (int i in Enumerable.Range(0, _nonNullDriverCount))
-            //    _sectionSent.WaitOne();
         }
 
         /// <summary>
@@ -240,7 +202,7 @@ namespace LedWallProtocol
         public override void SetWall(Color c)
         {
             LedMessage m = new LedMessageSolidColor(c);
-            foreachDriver(idx => { return m; });
+            foreachDriver((idx, driver) => driver.Send(m));
         }
     }
 }
